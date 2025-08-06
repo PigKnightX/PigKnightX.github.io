@@ -7,11 +7,6 @@ render_with_liquid: false
 author: pigknightx
 ---
 
-# Promise 原理解析
-以下是对 JavaScript 中 **Promise 实现原理** 的深入讲解，面向具有 5-10 年经验的前端工程师，涵盖从设计思想到规范实现的各个核心方面。
-
----
-
 ## 一、Promise 的核心设计思想与解决的问题
 
 ### 1.1 背景：异步编程的痛点
