@@ -1,0 +1,24 @@
+/* Keep the full experience in index.html; the sidebar only shows the model. */
+html.diorama-embed,
+.diorama-embed body {
+  background: transparent;
+}
+
+.diorama-embed .hud,
+.diorama-embed .snitch-tag,
+.diorama-embed .player-tip,
+.diorama-embed .weather-veil,
+.diorama-embed .lightning-flash,
+.diorama-embed #app::after {
+  display: none;
+}
+
+.diorama-embed .fallback {
+  padding: 12px;
+  font: 12px/1.6 sans-serif;
+  background: transparent;
+}
+
+.diorama-embed .fallback strong {
+  font-size: 14px;
+}
