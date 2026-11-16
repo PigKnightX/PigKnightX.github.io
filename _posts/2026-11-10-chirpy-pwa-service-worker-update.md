@@ -11,24 +11,24 @@ mermaid: true
 
 最近给博客左下角加了一个霍格沃茨魁地奇小场景。重新构建、部署之后，页面冒出一句：**“发现新版本的内容。”** 点击“更新”，页面刷新，新场景就出现了。
 
-一个静态博客，怎么还会自己发现更新？难道它一直盯着我的 GitHub？
+一个静态博客，怎么还会自己发现更新？
 
-答案藏在 Chirpy 自带的 **PWA / Service Worker 更新机制**里：浏览器检查到新版 Service Worker，主题显示提示；读者点击更新后，新版本接管，页面再刷新。
+Chirpy 自带一套 **PWA / Service Worker 更新机制**：浏览器检查到新版 Service Worker 时，主题显示提示；读者点击更新，新版本接管，页面再刷新。
 
-下面就拿这个博客当 Demo，顺着代码拆开看。只要懂一点 JavaScript，就能跟上。
+下面就拿这个博客当 Demo，顺着代码拆开看，用到的 JavaScript 不深。
 
 **2026-11-16 补充：** 文末新增五组问答，进一步解释 PWA 与 Service Worker 的关系、更新检查时机，以及为什么点击更新不能只调用 `reload()`。
 
 > 本文基于本博客使用的 Chirpy 7.3.0 及其现有代码。文中的源码链接固定在文章编写时的提交，不同版本的主题实现可能有差异。
 {: .prompt-info }
 
-## 1. 先认识三位主角
+## 1. 先分清三个概念
 
 - **PWA**：Progressive Web App，渐进式 Web 应用。它是一组让网站具有安装、离线访问等体验的能力，不是某一个 JavaScript 文件。
 - **Service Worker**：浏览器运行的一段独立脚本，可以拦截它所控制页面的请求、处理缓存。它不能直接操作页面 DOM。
 - **Cache Storage**：保存请求和响应的存储空间。Service Worker 可以用它缓存 HTML、CSS、JavaScript 等资源。
 
-可以把 Service Worker 想成请求途中的小管家：页面要拿资源时，它先看看本地有没有。它按事件被唤醒，并不需要一直运行；读者也不必把博客安装到桌面，在浏览器中访问就能使用这套机制。[MDN：Service Worker 入门](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
+页面要拿资源时，请求会先经过 Service Worker，由它决定从本地缓存返回，还是交给网络。它按事件被唤醒，并不需要一直运行；读者也不必把博客安装到桌面，在浏览器中访问就能使用这套机制。[MDN：Service Worker 入门](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
 
 本博客的主要策略是 **Cache First（缓存优先）**：
 
@@ -38,7 +38,7 @@ mermaid: true
   └─ 没有缓存 → 请求网络，符合条件的响应再存入缓存
 ```
 
-这解释了一个熟悉的现象：**服务器已经部署新内容，打开的页面却还可能使用旧缓存。** 所以，缓存之外还需要一套版本切换机制。
+**服务器已经部署新内容，打开的页面却还可能使用旧缓存**，原因就在这里。 所以，缓存之外还需要一套版本切换机制。
 
 这里的 Cache Storage 与浏览器依据 `Cache-Control` 管理的 HTTP 缓存是两回事，后面排查更新时会用到这个区别。
 
@@ -53,7 +53,7 @@ pwa:
     enabled: true
 ```
 
-先记住这几份文件，不用急着通读：
+这几份文件后面会反复用到，现在扫一眼文件名就行：
 
 | 源文件 | 作用 |
 | --- | --- |
@@ -105,7 +105,7 @@ importScripts('./assets/js/data/swconf.js');
 
 浏览器检查 Service Worker 更新时，会比较主脚本及其导入脚本的内容。即使 `/sw.min.js` 没变，只要检查时获取到的 `swconf.js` 变了，也能发现新版本。[浏览器的更新流程](https://developer.chrome.com/docs/workbox/service-worker-lifecycle#updates)
 
-这就接上了整条链：
+把前面的环节连起来，就是：
 
 ```mermaid
 flowchart TD
@@ -116,7 +116,7 @@ flowchart TD
   E --> F[点击更新，新版接管后页面刷新]
 ```
 
-注意中间的“**浏览器检查到**”。这份 Chirpy 代码没有通过 WebSocket 接收发布消息，也没有自己设置一个固定间隔的轮询定时器。导航到 Worker 作用范围内的页面会触发更新检查，也可以用 `registration.update()` 主动检查；相同 URL 和选项的重复 `register()` 不应被当成可靠的主动检查方式。**部署完成不代表所有打开的标签页都会立刻弹窗。** 具体触发时机在文末问答中展开。
+注意中间的“**浏览器检查到**”。这份 Chirpy 代码没有通过 WebSocket 接收发布消息，也没有自己设置一个固定间隔的轮询定时器。导航到 Worker 作用范围内的页面会触发更新检查，也可以用 `registration.update()` 主动检查；相同 URL 和选项的重复 `register()` 不应被当成可靠的主动检查方式。**部署完成不代表所有打开的标签页都会立刻弹窗。** 具体触发时机见文末问题四。
 
 更细一点：导入脚本的更新检查还可能受到 HTTP 缓存影响。默认的 `updateViaCache: 'imports'` 允许检查导入脚本时使用 HTTP 缓存，因此不能把它理解成“每次都立即拿到服务器最新文件”。[MDN：updateViaCache](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/updateViaCache)
 
@@ -164,7 +164,7 @@ registration.addEventListener('updatefound', () => {
 - `registration.waiting`：已经有安装完成、正在等待的 Worker。
 - `navigator.serviceWorker.controller`：当前页面已经由一个 Worker 控制。
 
-因此，第一次访问通常只是安装初始版本，不会被提示“发现新版本”。而老访客遇到一个等待接管的新版本，才会看到熟悉的小弹窗。
+因此，第一次访问通常只是安装初始版本，不会被提示“发现新版本”。而老访客遇到一个等待接管的新版本，才会看到开头那个更新弹窗。
 
 ## 5. 点击“更新”，到底发生了什么？
 
@@ -207,7 +207,7 @@ navigator.serviceWorker.addEventListener('controllerchange', () => {
 
 如果不点击按钮，等所有由旧 Worker 控制的页面关闭后，新版也可以结束等待、自动激活。
 
-如果同时开了多个博客标签页，其他由旧 Worker 控制、也监听了 `controllerchange` 的页面同样可能刷新。这个更新影响的是同一注册下的页面，不只是一枚按钮所在的标签页。
+如果同时开了多个博客标签页，其他由旧 Worker 控制、也监听了 `controllerchange` 的页面同样可能刷新。这个更新影响的是同一注册下的所有页面，不只是点了按钮的那个标签页。
 
 ## 6. 动手实验：让博客弹一次更新提示
 
@@ -273,9 +273,9 @@ registration.waiting?.state
 - **关闭弹窗，下次又出现**：关闭按钮只是隐藏提示；如果新版仍在 `waiting`，Chirpy 会再次展示它。
 - **刷新了，内容还是旧的**：旧 Worker 可能仍在控制页面，并从 Cache Storage 返回旧响应；检查是否有等待中的新版。
 
-## 8. 再追问五个为什么
+## 8. 五个延伸问题
 
-理解了代码流程，还可以再往前问一步：为什么要这么设计？下面这五个问题，把浏览器提供的能力与 Chirpy 选择的用法分开说明。
+流程弄懂之后，剩下的问题是设计层面的：为什么要这么安排？下面五组问答，把浏览器提供的能力与 Chirpy 的取舍分开说明。
 
 ### 问题一：PWA 和 Service Worker 什么关系？必须开启 PWA 才能使用吗？
 
@@ -295,14 +295,12 @@ navigator.serviceWorker.register('/sw.js');
 
 ### 问题二：Service Worker 只是用来检测资源变化吗？
 
-远不止如此。它主要提供的是：**让开发者用代码控制页面请求如何被处理，并响应一些后台事件。**
+更新检测只是顺带的能力。它的本职是：**让开发者用代码控制页面请求如何被处理，并响应一些后台事件。**[MDN：Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
 
 - **离线访问**：断网时返回已缓存的文章或备用页面。
 - **自定义缓存策略**：优先缓存、优先网络，或者先显示缓存，再从网络更新缓存。
 - **请求处理**：拦截受控页面的请求，根据网络状态等条件决定如何响应。
 - **推送和后台同步**：接收推送事件，或在条件允许时补交离线操作。这些能力还取决于浏览器支持、权限及相关 API。
-
-Worker 按事件运行，并不是一直常驻执行的后台进程。[MDN：Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
 
 这里有三个角色，别混在一起：
 
@@ -361,7 +359,7 @@ if (registration) {
 
 这只是**检查更新**，不会直接让新版接管。[MDN：update()](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/update)
 
-相同 URL 和选项的重复注册，不应被当成可靠的主动检查方式；有明确检查需求时，应使用 `update()`。而检查时能否获取最新导入脚本，还受 HTTP 缓存策略影响，所以“触发检查”和“发现新版”也不是同一件事。
+至于检查时能否拿到最新的导入脚本，还受 HTTP 缓存策略影响（第 3 节提过），所以“触发了检查”与“发现了新版”仍不是同一件事。
 
 ### 问题五：为什么先 skipWaiting，再监听 controllerchange？直接 reload 不行吗？
 
@@ -406,8 +404,6 @@ window.location.reload(); // 这里可能抢先执行
 
 反过来，只切换 Worker 而不刷新，也不会自动替换页面里已经加载的 HTML 和正在运行的 JavaScript。因此，Chirpy 把两步连起来：先交接控制者，再让页面重新加载。这也让其他监听了同一事件的博客标签页能够一起刷新。
 
-读到这里，再看到那句“发现新版本的内容”，就可以把它翻译成一句更准确的话：
+现在再看开头那句“发现新版本的内容”，它真正在说的是：
 
 > **新的 Service Worker 已经安装好了，正在等你允许它接管。**
-
-静态博客负责生成文件，浏览器负责检查和管理 Worker，Chirpy 把缓存切换与页面提示连接起来。一个小弹窗，正好串起了从构建、缓存到页面刷新的完整过程。
