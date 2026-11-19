@@ -1,12 +1,12 @@
 ---
 layout: compress
 permalink: '/:path/swconf.js'
-# Note that this file will be fetched by the ServiceWorker, so it will not be cached.
+# Imported scripts can use the HTTP cache; the Worker includes a build version in its URL.
 ---
 
 const swconf = {
   {% if site.pwa.cache.enabled %}
-    cacheName: 'chirpy-{{ "now" | date: "%s" }}',
+    cacheName: 'chirpy-{{ site.time | date: "%s" }}',
 
     {%- comment -%} Resources added to the cache during PWA installation. {%- endcomment -%}
     resources: [

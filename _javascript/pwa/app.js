@@ -3,8 +3,8 @@ import Toast from 'bootstrap/js/src/toast';
 if ('serviceWorker' in navigator) {
   // Get Jekyll config from URL parameters
   const src = new URL(document.currentScript.src);
-  const register = src.searchParams.get('register');
-  const baseUrl = src.searchParams.get('baseurl');
+  const register = src.searchParams.get('register') === 'true';
+  const baseUrl = src.searchParams.get('baseurl') || '';
 
   if (register) {
     const swUrl = `${baseUrl}/sw.min.js`;
@@ -12,37 +12,80 @@ if ('serviceWorker' in navigator) {
     const btnRefresh = notification.querySelector('.toast-body>button');
     const popupWindow = Toast.getOrCreateInstance(notification);
 
-    navigator.serviceWorker.register(swUrl).then((registration) => {
-      // Restore the update window that was last manually closed by the user
-      if (registration.waiting) {
-        popupWindow.show();
-      }
-
-      registration.addEventListener('updatefound', () => {
-        registration.installing.addEventListener('statechange', () => {
-          if (registration.waiting) {
-            if (navigator.serviceWorker.controller) {
-              popupWindow.show();
-            }
+    navigator.serviceWorker
+      .register(swUrl, { updateViaCache: 'none' })
+      .then((registration) => {
+        const showUpdate = () => {
+          if (registration.waiting && navigator.serviceWorker.controller) {
+            popupWindow.show();
           }
-        });
-      });
+        };
 
-      btnRefresh.addEventListener('click', () => {
-        if (registration.waiting) {
-          registration.waiting.postMessage('SKIP_WAITING');
-        }
-        popupWindow.hide();
+        const watchInstalling = () => {
+          const worker = registration.installing;
+          if (worker) {
+            worker.addEventListener('statechange', showUpdate);
+          }
+          showUpdate();
+        };
+
+        registration.addEventListener('updatefound', watchInstalling);
+        // Navigation may start an update before register() resolves.
+        watchInstalling();
+
+        const checkInterval = 60 * 1000;
+        let lastCheck = -Infinity;
+        let checking = false;
+
+        const checkForUpdates = async () => {
+          showUpdate();
+
+          if (
+            navigator.onLine === false ||
+            document.visibilityState === 'hidden' ||
+            registration.installing ||
+            checking ||
+            Date.now() - lastCheck < checkInterval
+          ) {
+            return;
+          }
+
+          lastCheck = Date.now();
+          checking = true;
+
+          try {
+            await registration.update();
+          } catch (error) {
+            lastCheck = -Infinity;
+            console.warn('[PWA] Update check failed:', error);
+          } finally {
+            checking = false;
+          }
+        };
+
+        window.addEventListener('pageshow', checkForUpdates);
+        window.addEventListener('online', checkForUpdates);
+        document.addEventListener('visibilitychange', checkForUpdates);
+        checkForUpdates();
+
+        btnRefresh.addEventListener('click', () => {
+          if (registration.waiting) {
+            registration.waiting.postMessage('SKIP_WAITING');
+          }
+          popupWindow.hide();
+        });
+      })
+      .catch((error) => {
+        console.warn('[PWA] Registration failed:', error);
       });
-    });
 
     let refreshing = false;
 
     // Detect controller change and refresh all the opened tabs
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!refreshing) {
-        window.location.reload();
         refreshing = true;
+        window.location.reload();
       }
     });
   } else {

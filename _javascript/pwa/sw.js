@@ -1,4 +1,5 @@
-importScripts('./assets/js/data/swconf.js');
+// Change the main script and import URL on every build, including for old clients.
+importScripts("./assets/js/data/swconf.js?v={{ site.time | date: '%s' }}");
 
 const purge = swconf.purge;
 const interceptor = swconf.interceptor;
@@ -32,7 +33,9 @@ self.addEventListener('install', (event) => {
 
   event.waitUntil(
     caches.open(swconf.cacheName).then((cache) => {
-      return cache.addAll(swconf.resources);
+      return cache.addAll(
+        swconf.resources.map((url) => new Request(url, { cache: 'reload' }))
+      );
     })
   );
 });
@@ -67,7 +70,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((response) => {
+    caches.match(event.request, { cacheName: swconf.cacheName }).then((response) => {
       if (response) {
         return response;
       }
